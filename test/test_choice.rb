@@ -49,7 +49,7 @@ class TestChoice < Test::Unit::TestCase
   end
 
   def test_failed_parse
-    assert Hash.new, Choice.parse
+    assert_nil Choice.parse
   end
 
   HELP_STRING = ''

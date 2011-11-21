@@ -119,7 +119,7 @@ module Choice
           
           # Grab values from --long=VALUE format
           name, value = arg.split('=', 2)
-          name = longs.index(name)
+          name = longs.key(name)
           
           if value.nil? && args.first !~ /^-/
             # Grab value otherwise if not in --long=VALUE format.  Assume --long VALUE.
@@ -128,7 +128,7 @@ module Choice
           end
 
           # If we expect an array, tack this argument on.
-          if arrayed[name]
+          if arrayed[name] && value
             # If this is arrayed and the value isn't nil, set it.
             choices[name] ||= []
             choices[name] << value unless value.nil?
@@ -165,7 +165,7 @@ module Choice
         end
 
         # Make sure the argument is valid
-        raise InvalidArgument unless value.to_a.all? { |v| hashes['valids'][name].include?(v) } if hashes['valids'][name] 
+        raise InvalidArgument unless Array(value).all? { |v| hashes['valids'][name].include?(v) } if hashes['valids'][name] 
 
         # Cast the argument using the method defined in the constant hash.
         value = value.send(CAST_METHODS[hashes['casts'][name]]) if hashes['casts'].include?(name)

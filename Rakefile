@@ -3,7 +3,7 @@
 require 'rubygems'
 require 'rake'
 require 'rake/testtask'
-require 'rake/rdoctask'
+#require 'rdoc/task'
 require 'rake/contrib/sshpublisher'
 require './lib/choice/version'
 
@@ -22,7 +22,7 @@ PACKAGE_FILES = FileList.new do |fl|
   fl.include SOURCE_FILES
 end
 
-Gem.manage_gems
+# Gem.manage_gems
 
 def can_require( file )
   begin
@@ -150,7 +150,7 @@ task :rdoc => :rdoc_core do
     cp f, img_dir
   }
 end
-
+=begin
 Rake::RDocTask.new( :rdoc_core ) do |rdoc|
   rdoc.rdoc_dir = rdoc_dir
   rdoc.title    = "Choice -- A simple command line option parser"
@@ -169,3 +169,4 @@ end
 
 desc "Publish the documentation"
 task :pubdoc => [:pubrdoc]
+=end
