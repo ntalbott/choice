@@ -1,172 +1,150 @@
-# ripped off of jamis buck's lovely net::sftp rakefile
-
 require 'rubygems'
 require 'rake'
+require 'date'
+
+#############################################################################
+#
+# Helper functions
+#
+#############################################################################
+
+def name
+  @name ||= Dir['*.gemspec'].first.split('.').first
+end
+
+def version
+  line = File.read("lib/#{name}.rb")[/^\s*VERSION\s*=\s*.*/]
+  line.match(/.*VERSION\s*=\s*['"](.*)['"]/)[1]
+end
+
+def date
+  Date.today.to_s
+end
+
+def rubyforge_project
+  name
+end
+
+def gemspec_file
+  "#{name}.gemspec"
+end
+
+def gem_file
+  "#{name}-#{version}.gem"
+end
+
+def replace_header(head, header_name)
+  head.sub!(/(\.#{header_name}\s*= ').*'/) { "#{$1}#{send(header_name)}'"}
+end
+
+#############################################################################
+#
+# Standard tasks
+#
+#############################################################################
+
+task :default => :test
+
 require 'rake/testtask'
-#require 'rdoc/task'
-require 'rake/contrib/sshpublisher'
-require './lib/choice/version'
+Rake::TestTask.new(:test) do |test|
+  test.libs << 'lib' << 'test'
+  test.pattern = 'test/**/test_*.rb'
+  test.verbose = true
+end
 
-PACKAGE_NAME = "choice"
-PACKAGE_VERSION = Choice::Version::STRING
+desc "Generate RCov test coverage and open in your browser"
+task :coverage do
+  require 'rcov'
+  sh "rm -fr coverage"
+  sh "rcov test/test_*.rb"
+  sh "open coverage/index.html"
+end
 
-SOURCE_FILES = FileList.new do |fl|
-  [ "examples", "lib", "test" ].each do |dir|
-    fl.include "#{dir}/**/*"
+require 'rdoc/task'
+RDoc::Task.new do |rdoc|
+  rdoc.rdoc_dir = 'rdoc'
+  rdoc.title = "#{name} #{version}"
+  rdoc.rdoc_files.include('README*')
+  rdoc.rdoc_files.include('lib/**/*.rb')
+end
+
+desc "Open an irb session preloaded with this library"
+task :console do
+  sh "irb -rubygems -r ./lib/#{name}.rb"
+end
+
+#############################################################################
+#
+# Custom tasks (add your own tasks here)
+#
+#############################################################################
+
+
+
+#############################################################################
+#
+# Packaging tasks
+#
+#############################################################################
+
+desc "Create tag v#{version} and build and push #{gem_file} to Rubygems"
+task :release => :build do
+  unless `git branch` =~ /^\* master$/
+    puts "You must be on the master branch to release!"
+    exit!
   end
-  fl.include "Rakefile"
+  sh "git commit --allow-empty -a -m 'Release #{version}'"
+  sh "git tag v#{version}"
+  sh "git push origin master"
+  sh "git push origin v#{version}"
+  sh "gem push pkg/#{name}-#{version}.gem"
 end
 
-PACKAGE_FILES = FileList.new do |fl|
-  fl.include "CHANGELOG", "README", "LICENSE"
-  fl.include SOURCE_FILES
+desc "Build #{gem_file} into the pkg directory"
+task :build => :gemspec do
+  sh "mkdir -p pkg"
+  sh "gem build #{gemspec_file}"
+  sh "mv #{gem_file} pkg"
 end
 
-# Gem.manage_gems
+desc "Generate #{gemspec_file}"
+task :gemspec => :validate do
+  # read spec file and split out manifest section
+  spec = File.read(gemspec_file)
+  head, manifest, tail = spec.split("  # = MANIFEST =\n")
 
-def can_require( file )
-  begin
-    require file
-    return true
-  rescue LoadError
-    return false
+  # replace name version and date
+  replace_header(head, :name)
+  replace_header(head, :version)
+  replace_header(head, :date)
+  #comment this out if your rubyforge_project has a different name
+  replace_header(head, :rubyforge_project)
+
+  # determine file list from git ls-files
+  files = `git ls-files`.
+    split("\n").
+    sort.
+    reject { |file| file =~ /^\./ }.
+    reject { |file| file =~ /^(rdoc|pkg)/ }.
+    map { |file| "    #{file}" }.
+    join("\n")
+
+  # piece file back together and write
+  manifest = "  s.files = %w[\n#{files}\n  ]\n"
+  spec = [head, manifest, tail].join("  # = MANIFEST =\n")
+  File.open(gemspec_file, 'w') { |io| io.write(spec) }
+  puts "Updated #{gemspec_file}"
+end
+
+desc "Validate #{gemspec_file}"
+task :validate do
+  libfiles = Dir['lib/*'] - ["lib/#{name}.rb", "lib/#{name}"]
+  unless libfiles.empty?
+    puts "Directory `lib` should only contain a `#{name}.rb` file and `#{name}` dir."
+    exit!
   end
-end
-
-desc "Default task"
-task :default => [ :test ]
-
-desc "Build documentation"
-task :doc => [ :rdoc ]
-
-task :rdoc => SOURCE_FILES
-
-Rake::TestTask.new :test do |t|
-  t.test_files = [ "test/test*" ]
-end
-
-desc "Clean generated files"
-task :clean do
-  rm_rf "pkg"
-  rm_rf "api"
-end
-
-desc "Prepackage warnings and reminders"
-task :prepackage do
-  unless ENV["OK"] == "yes"
-    puts "========================================================="
-    puts " Please check that the following files have been updated"
-    puts " in preparation for release #{Choice::Version::STRING}:"
-    puts
-    puts "   README (with latest info)"
-    puts "   CHANGELOG (with the recent changes)"
-    puts "   lib/choice/version.rb (with current version number)"
-    puts
-    puts " Did you remember to 'rake tag'?"  
-    puts
-    puts " If you are sure these have all been taken care of, re-run"
-    puts " rake with 'OK=yes'."
-    puts "========================================================="
-    puts
-
-    abort
-  end
-end
-
-desc "Tag the current trunk with the current release version"
-task :tag do
-  warn "WARNING: this will tag svn://rubyforge.org/var/svn/choice/trunk using the tag v#{Choice::Version::MAJOR}_#{Choice::Version::MINOR}_#{Choice::Version::TINY}"
-  warn "If you do not wish to continue, you have 5 seconds to cancel by pressing CTRL-C..."
-  5.times { |i| print "#{5-i} "; $stdout.flush; sleep 1 }
-  system "svn copy svn+ssh://defunkt@rubyforge.org/var/svn/choice/trunk svn+ssh://defunkt@rubyforge.org/var/svn/choice/tags/v#{Choice::Version::MAJOR}_#{Choice::Version::MINOR}_#{Choice::Version::TINY} -m \"Tagging the #{Choice::Version::STRING} release\""
-end
-
-package_name = "#{PACKAGE_NAME}-#{PACKAGE_VERSION}"
-package_dir = "pkg"
-package_dir_path = "#{package_dir}/#{package_name}"
-
-gz_file = "#{package_name}.tar.gz"
-gem_file = "#{package_name}.gem"
-
-task :gzip => SOURCE_FILES + [ "#{package_dir}/#{gz_file}" ]
-task :gem  => SOURCE_FILES + [ "#{package_dir}/#{gem_file}" ]
-
-desc "Build all packages"
-task :package => [ :prepackage, :test, :gzip, :gem ]
-
-directory package_dir
-
-file package_dir_path do
-  mkdir_p package_dir_path rescue nil
-  PACKAGE_FILES.each do |fn|
-    f = File.join( package_dir_path, fn )
-    if File.directory?( fn )
-      mkdir_p f unless File.exist?( f )
-    else
-      dir = File.dirname( f )
-      mkdir_p dir unless File.exist?( dir )
-      rm_f f
-      safe_ln fn, f
-    end
+  unless Dir['VERSION*'].empty?
+    puts "A `VERSION` file at root level violates Gem best practices."
+    exit!
   end
 end
-
-file "#{package_dir}/#{gz_file}" => package_dir_path do
-  rm_f "#{package_dir}/#{gz_file}"
-  chdir package_dir do
-    sh %{tar czvf #{gz_file} #{package_name}}
-  end
-end
-
-file "#{package_dir}/#{gem_file}" => package_dir do
-  spec = Gem::Specification.new do |s|
-  	s.name = 'choice'
-  	s.version = Choice::Version::STRING
-  	s.platform = Gem::Platform::RUBY
-  	s.date = Time.now
-  	s.summary = "Choice is a command line option parser."
-  	s.description = "Choice is a simple little gem for easily defining and parsing command line options with a friendly DSL."
-  	s.require_paths = [ 'lib' ]
-  	s.files = %w[README CHANGELOG LICENSE]
-  	[ 'lib/**/*', 'test/*', 'examples/*' ].each do |dir|
-  	  s.files += Dir.glob( dir ).delete_if { |item| item =~ /^\./ }
-  	end
-  	s.author = "Chris Wanstrath"
-  	s.email = 'chris@ozmm.org'
-  	s.homepage = 'http://choice.rubyforge.org/'
-  	s.autorequire = 'choice'
-  end
-  Gem::Builder.new(spec).build
-  mv gem_file, "#{package_dir}/#{gem_file}"
-end
-
-rdoc_dir = "api"
-
-desc "Build the RDoc API documentation"
-task :rdoc => :rdoc_core do
-  img_dir = File.join( rdoc_dir, "files", "doc", "images" )
-  mkdir_p img_dir
-  Dir["doc/images/*"].reject { |i| File.directory?(i) }.each { |f|
-    cp f, img_dir
-  }
-end
-=begin
-Rake::RDocTask.new( :rdoc_core ) do |rdoc|
-  rdoc.rdoc_dir = rdoc_dir
-  rdoc.title    = "Choice -- A simple command line option parser"
-  rdoc.option_string << '--line-numbers --inline-source --main README'
-  rdoc.rdoc_files.include 'README'
-  rdoc.rdoc_files.include 'lib/**/*.rb'
-end
-
-desc "Publish the API documentation"
-task :pubrdoc => [ :rdoc ] do
-Rake::SshDirPublisher.new(
-  "defunkt@rubyforge.org",
-  "/var/www/gforge-projects/choice/",
-  "api" ).upload
-end
-
-desc "Publish the documentation"
-task :pubdoc => [:pubrdoc]
-=end

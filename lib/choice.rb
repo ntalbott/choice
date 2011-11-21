@@ -7,7 +7,9 @@ require 'choice/lazyhash'
 #
 # Usage of this module is lovingly detailed in the README file.
 #
-module Choice 
+module Choice
+  VERSION = "0.1.4"
+
   extend self
 
   # The main method, which defines the options
